@@ -19,44 +19,70 @@
  */
 namespace DPDBenelux\Shipping\Observer;
 
+use Magento\Framework\App\State;
+use Magento\Framework\App\Area;
+use Magento\Framework\App\Config\ScopeConfigInterface;
+use Magento\Framework\Event\Observer;
 use Magento\Framework\Event\ObserverInterface;
-use Magento\Sales\Model\Order;
-use Magento\Sales\Model\Order\Address;
+use Magento\Framework\Exception\LocalizedException;
+use Magento\Framework\Exception\NoSuchEntityException;
+use Magento\Customer\Api\AddressMetadataInterface;
+use Magento\Eav\Api\Data\AttributeInterface;
+use Magento\Eav\Api\AttributeRepositoryInterface;
+use Magento\Sales\Api\Data\OrderInterface;
+use Magento\Sales\Api\Data\OrderAddressInterface;
 use Magento\Sales\Model\OrderRepository;
 
+/**
+ * Class SalesOrderAddressSaveBefore
+ * @package DPDBenelux\Shipping\Observer
+ */
 class SalesOrderAddressSaveBefore implements ObserverInterface
 {
+
     /**
-     * @var \Magento\Framework\App\State
+     * @var State
      */
     private $state;
 
     /**
-     * @var \Magento\Framework\App\Config\ScopeConfigInterface
+     * @var ScopeConfigInterface
      */
     protected $scopeConfig;
 
+    /**
+     * @var AttributeRepositoryInterface
+     */
+    protected $attributeRepository;
+
+    /**
+     * SalesOrderAddressSaveBefore constructor.
+     * @param State $state
+     * @param ScopeConfigInterface $scopeConfig
+     * @param AttributeRepositoryInterface $attributeRepository
+     */
     public function __construct(
-        \Magento\Framework\App\State $state,
-        \Magento\Framework\App\Config\ScopeConfigInterface $scopeConfig
-    )
-    {
+        State $state,
+        ScopeConfigInterface $scopeConfig,
+        AttributeRepositoryInterface $attributeRepository
+    ) {
         $this->state = $state;
         $this->scopeConfig = $scopeConfig;
+        $this->attributeRepository = $attributeRepository;
     }
 
-    public function execute(\Magento\Framework\Event\Observer $observer)
+    public function execute(Observer $observer)
     {
         // Ignore adminhtml
-        if ($this->state->getAreaCode() == \Magento\Framework\App\Area::AREA_ADMINHTML) {
+        if ($this->state->getAreaCode() == Area::AREA_ADMINHTML) {
             return;
         }
 
+        /** @var OrderAddressInterface $shippingAddress */
         $shippingAddress = $observer->getEvent()->getAddress();
-        /** @var Address $shippingAddress */
 
+        /** @var OrderInterface $order */
         $order = $shippingAddress->getOrder();
-        /** @var Order $order */
 
         // Ignore all orders that aren't dpd pickup
         if ($order->getShippingMethod() != 'dpdpickup_dpdpickup') {
@@ -83,7 +109,15 @@ class SalesOrderAddressSaveBefore implements ObserverInterface
             $shippingAddress->setCompany('DPD ParcelShop: ' . $order->getDpdCompany());
         }
 
-        // empty this otherwise you'd get customer data and DPD parcelshop data mixed up
-        $shippingAddress->setTelephone('');
+        try {
+            $telephoneAttribute = $this->attributeRepository->get(AddressMetadataInterface::ENTITY_TYPE_ADDRESS, OrderAddressInterface::TELEPHONE);
+            // Check if the attribute is required as otherwise the order can't be placed
+            if (!$telephoneAttribute->getIsRequired()) {
+                // empty this otherwise you'd get customer data and DPD parcelshop data mixed up
+                $shippingAddress->setTelephone('');
+            }
+        } catch (NoSuchEntityException|LocalizedException $e) {
+            // Don't allow thrown exceptions to interrupt the customer's order
+        }
     }
 }
